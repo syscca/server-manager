@@ -3,7 +3,7 @@
 # 安装组件列表（包含所有组件）
 install_components=("nginx" "nodejs" "pm2" "sqlite" "redis" "acme")
 
-# 卸载组件列表（仅需一键卸载的组件）
+# 卸载组件列表（包含所有组件）
 uninstall_components=("acme" "redis" "sqlite" "pm2" "nodejs" "nginx")
 
 # 检查是否为 root 用户
