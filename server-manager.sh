@@ -4,7 +4,7 @@
 install_components=("nginx" "nodejs" "pm2" "sqlite" "redis" "acme")
 
 # 卸载组件列表（仅需一键卸载的组件）
-uninstall_components=("nginx" "nodejs" "redis" "acme")
+uninstall_components=("acme" "redis" "sqlite" "pm2" "nodejs" "nginx")
 
 # 检查是否为 root 用户
 if [ "$(id -u)" != "0" ]; then
@@ -139,6 +139,11 @@ show_status() {
 
 # 安装组件函数
 install_nginx() {
+    # 检查是否已安装
+    if command -v nginx &>/dev/null; then
+        echo "Nginx 已安装，跳过安装。"
+        return
+    fi   
     echo "正在安装 Nginx..."
     if ! apt install -y nginx; then
         echo "错误：Nginx 安装失败"
@@ -166,6 +171,11 @@ install_nginx() {
 }
 
 install_nodejs() {
+    # 检查是否已安装
+    if command -v node &>/dev/null; then
+        echo "Node.js 已安装，跳过安装。"
+        return
+    fi
     echo "正在安装 Node.js..."
     if ! curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - || ! apt install -y nodejs; then
         echo "错误：Node.js 安装失败"
@@ -175,6 +185,11 @@ install_nodejs() {
 }
 
 install_pm2() {
+    # 检查是否已安装
+    if command -v pm2 &>/dev/null; then
+        echo "pm2 已安装，跳过安装。"
+        return
+    fi
     if ! command -v node &>/dev/null; then
         install_nodejs
     fi
@@ -187,18 +202,30 @@ install_pm2() {
 }
 
 install_sqlite() {
+    # 检查 Node.js 是否安装，未安装则调用安装函数
     if ! command -v node &>/dev/null; then
         install_nodejs
     fi
-    echo "正在安装 SQLite..."
-    if ! npm install -g sqlite3; then
-        echo "错误：SQLite 安装失败"
-        exit 1
+
+    # 检查是否已全局安装 sqlite3
+    if npm ls -g sqlite3 --depth=0 >/dev/null 2>&1; then
+        echo "SQLite 已安装，跳过安装。"
+    else
+        echo "正在安装 SQLite..."
+        if ! npm install -g sqlite3; then
+            echo "错误：SQLite 安装失败"
+            exit 1
+        fi
+        echo "SQLite 已安装。"
     fi
-    echo "SQLite 已安装。"
 }
 
 install_redis() {
+    # 检查是否已安装
+    if command -v redis-server &>/dev/null; then
+        echo "Redis 已安装，跳过安装。"
+        return
+    fi
     echo "正在安装 Redis..."
     if ! apt install -y redis-server; then
         echo "错误：Redis 安装失败"
@@ -218,6 +245,11 @@ install_redis() {
 }
 
 install_acme() {
+    # 检查是否已安装
+    if [ -d "/root/.acme.sh" ]; then
+        echo "acme.sh 已安装，跳过安装。"
+        return
+    fi
     echo "正在安装 acme.sh..."
     if ! curl https://get.acme.sh | sh; then
         echo "错误：acme.sh 安装失败"
@@ -237,13 +269,19 @@ install_all() {
 
 # 卸载组件函数
 uninstall_nginx() {
+    # 检测 Nginx 是否安装
+    if ! command -v nginx &>/dev/null && [ ! -d "/etc/nginx" ]; then
+        echo "Nginx 未安装，跳过卸载。"
+        return
+    fi
+
     systemctl stop nginx 2>/dev/null
     # 检查网站目录是否存在
     if [ -d "/var/www" ] && [ "$(ls -A /var/www)" ]; then
         echo "检测到网站目录存在于 /var/www 下："
         ls -1 /var/www
-        read -p "是否删除所有网站目录？(y/n): " delete_dirs
-        if [ "$delete_dirs" == "y" ]; then
+        read -p "是否删除所有网站目录？(n/Y): " delete_dirs
+        if [[ -z "$delete_dirs" || "$delete_dirs" =~ ^[yY]$ ]]; then
             echo "正在删除网站目录..."
             rm -rf /var/www/*
             echo "网站目录已删除。"
@@ -260,6 +298,12 @@ uninstall_nginx() {
 }
 
 uninstall_nodejs() {
+    # 检测 Node.js 是否安装
+    if ! command -v node &>/dev/null; then
+        echo "Node.js 未安装，跳过卸载。"
+        return
+    fi
+
     apt remove -y --purge nodejs
     rm -rf /usr/local/lib/node_modules
     rm -rf /usr/lib/node_modules
@@ -267,8 +311,13 @@ uninstall_nodejs() {
 }
 
 uninstall_sqlite() {
-    hash -r # 清除缓存
     if command -v npm &>/dev/null; then
+        # 检查是否全局安装了 sqlite3（条件取反逻辑修复）
+        if ! npm ls -g sqlite3 --depth=0 >/dev/null 2>&1; then
+            echo "SQLite 未安装，跳过卸载。"
+            return
+        fi
+        # 执行卸载
         npm uninstall -g sqlite3
         echo "SQLite 已卸载。"
     else
@@ -277,16 +326,24 @@ uninstall_sqlite() {
 }
 
 uninstall_pm2() {
-    hash -r # 清除缓存
     if command -v npm &>/dev/null; then
-        npm uninstall -g pm2
-        echo "pm2 已卸载。"
+    # 检测 pm2 是否安装
+    if ! command -v pm2 &>/dev/null; then
+        echo "pm2 未安装，跳过卸载。"
+        return
+    fi
+    npm uninstall -g pm2
+    echo "pm2 已卸载。"
     else
         echo "警告：npm 未安装，无法卸载 pm2"
     fi
 }
 
 uninstall_redis() {
+    if ! command -v redis-server &>/dev/null; then
+        echo "Redis 未安装，跳过卸载。"
+        return
+    fi
     systemctl stop redis-server 2>/dev/null
     apt remove -y --purge redis-server
     rm -rf /var/lib/redis
@@ -294,6 +351,10 @@ uninstall_redis() {
 }
 
 uninstall_acme() {
+    if [ ! -d "/root/.acme.sh" ]; then
+        echo "acme.sh 未安装，跳过卸载。"
+        return
+    fi
     rm -rf /root/.acme.sh
     echo "acme.sh 已卸载。"
 }
@@ -378,20 +439,38 @@ manage_website() {
     read -p "请选择操作（输入数字）: " web_choice
     case $web_choice in
     1)
+        local script_dir=$(dirname "${BASH_SOURCE[0]}")
+        local backup_dir="$script_dir/backups"
+        mkdir -p "$backup_dir" 2>/dev/null
+
         read -p "请输入监听端口（默认 80）: " listen_port
         listen_port=${listen_port:-80}
         if ! [[ "$listen_port" =~ ^[0-9]+$ ]] || [ "$listen_port" -lt 1 ] || [ "$listen_port" -gt 65535 ]; then
             echo "错误：端口号必须为 1-65535 之间的数字"
             return
         fi
-        if ss -tln | grep -q ":$listen_port "; then
-            echo "错误：端口 $listen_port 已被占用"
-            return
-        fi
         read -p "请输入网站域名（留空允许所有域名）: " domains
         domains=${domains:-_}
         local dir_name
         [ "$domains" == "_" ] && dir_name="default" || dir_name=$(echo "$domains" | awk '{print $1}' | sed 's/[^a-zA-Z0-9]/_/g')
+        
+        # 检查备份并提示还原
+        local backup_file="$backup_dir/${dir_name}_static.tar.gz"
+        if [ -f "$backup_file" ]; then
+            read -p "发现备份文件 $backup_file，是否还原？(y/n): " restore_choice
+            if [ "$restore_choice" == "y" ]; then
+                echo "正在还原备份..."
+                tar -xzf "$backup_file" -C / 2>/dev/null || {
+                    echo "错误：还原备份失败"
+                    return
+                }
+                ln -sf "/etc/nginx/sites-available/$dir_name" "/etc/nginx/sites-enabled/" 2>/dev/null
+                systemctl reload nginx
+                echo "还原完成。访问地址：http://$(hostname -I | awk '{print $1}'):$listen_port"
+                return
+            fi
+        fi
+
         local root_dir="/var/www/$dir_name"
         mkdir -p "$root_dir" || {
             echo "错误：无法创建目录 $root_dir"
@@ -434,7 +513,12 @@ EOF
             return
         fi
         ;;
+
     2)
+        local script_dir=$(dirname "${BASH_SOURCE[0]}")
+        local backup_dir="$script_dir/backups"
+        mkdir -p "$backup_dir" 2>/dev/null
+
         read -p "请输入监听端口（留空自动生成随机端口）: " listen_port
         if [ -z "$listen_port" ]; then
             while true; do
@@ -462,6 +546,24 @@ EOF
             return
         fi
         local config_name="proxy_$listen_port"
+        
+        # 检查备份并提示还原
+        local backup_file="$backup_dir/${config_name}_proxy.tar.gz"
+        if [ -f "$backup_file" ]; then
+            read -p "发现备份文件 $backup_file，是否还原？(y/n): " restore_choice
+            if [ "$restore_choice" == "y" ]; then
+                echo "正在还原备份..."
+                tar -xzf "$backup_file" -C / 2>/dev/null || {
+                    echo "错误：还原备份失败"
+                    return
+                }
+                ln -sf "/etc/nginx/sites-available/$config_name" "/etc/nginx/sites-enabled/" 2>/dev/null
+                systemctl reload nginx
+                echo "还原完成。前端端口：$listen_port，后端地址：$backend_ip:$backend_port"
+                return
+            fi
+        fi
+
         local config_file="/etc/nginx/sites-available/$config_name"
         cat <<EOF >"$config_file"
 server {
@@ -528,23 +630,80 @@ EOF
         nginx -t && systemctl reload nginx && echo "HTTPS 重定向配置完成。" || echo "错误：Nginx 配置验证失败"
         ;;
     5)
-        echo "===== 已配置的网站列表 ====="
-        ls /etc/nginx/sites-available/ 2>/dev/null || echo "无可用配置"
-        read -p "请输入要删除的网站配置名称（留空取消）: " config_name
-        [ -z "$config_name" ] && return
-        if [ ! -f "/etc/nginx/sites-available/$config_name" ]; then
-            echo "错误：配置 $config_name 不存在"
-            return
+    echo "===== 已配置的网站列表 ====="
+    local configs=($(ls /etc/nginx/sites-available/ 2>/dev/null))
+    if [ ${#configs[@]} -eq 0 ]; then
+        echo "无可用配置"
+        return
+    fi
+
+    # 显示带编号的配置列表
+    echo "请选择要删除的配置："
+    for i in "${!configs[@]}"; do
+        echo "$((i+1)). ${configs[$i]}"
+    done
+
+    read -p "输入配置编号（留空取消）: " config_num
+    [ -z "$config_num" ] && return
+
+    # 验证输入是否为有效数字
+    if ! [[ "$config_num" =~ ^[0-9]+$ ]] || [ "$config_num" -lt 1 ] || [ "$config_num" -gt ${#configs[@]} ]; then
+        echo "错误：无效的编号"
+        return
+    fi
+
+    # 获取配置名称
+    config_name="${configs[$((config_num-1))]}"
+    config_path="/etc/nginx/sites-available/$config_name"
+
+    # 默认删除，无需确认
+    echo "正在删除配置: $config_name ..."
+
+    # 备份处理（默认不备份，仅当用户输入 y 时备份）
+    local script_dir=$(dirname "${BASH_SOURCE[0]}")
+    local backup_dir="$script_dir/backups"
+    mkdir -p "$backup_dir" || { echo "错误：无法创建备份目录"; return; }
+
+    # 判断是否为静态网站（非 proxy_ 开头）
+    if [[ ! "$config_name" =~ ^proxy_ ]]; then
+        read -p "是否备份配置和网站目录？[y/N]: " backup_choice
+        if [[ "$backup_choice" =~ ^[yY]$ ]]; then
+            tar -czf "$backup_dir/${config_name}_static.tar.gz" \
+                -C /etc/nginx/sites-available "$config_name" \
+                -C /var/www "$config_name" 2>/dev/null || {
+                echo "错误：备份失败，请检查权限"
+                return
+            }
+            echo "备份已保存至: $backup_dir/${config_name}_static.tar.gz"
         fi
-        read -p "确认删除 $config_name 配置？(y/n): " confirm
-        [ "$confirm" != "y" ] && {
-            echo "操作已取消"
-            return
-        }
-        rm -f "/etc/nginx/sites-available/$config_name" "/etc/nginx/sites-enabled/$config_name"
-        [[ "$config_name" != proxy_* ]] && rm -rf "/var/www/$config_name"
-        nginx -t && systemctl reload nginx && echo "网站配置 $config_name 已删除。"
-        ;;
+read -p "是否删除网站目录 /var/www/$config_name？[Y/n]: " delete_dir
+# 判断输入为空、Y 或 y（默认回车执行删除）
+if [[ -z "$delete_dir" || "$delete_dir" =~ ^[yY]$ ]]; then
+    rm -rf "/var/www/$config_name"
+    echo "网站目录已删除。"
+fi
+    else
+        read -p "是否备份反向代理配置？[y/N]: " backup_choice
+        if [[ "$backup_choice" =~ ^[yY]$ ]]; then
+            tar -czf "$backup_dir/${config_name}_proxy.tar.gz" \
+                -C /etc/nginx/sites-available "$config_name" 2>/dev/null || {
+                echo "错误：备份失败，请检查权限"
+                return
+            }
+            echo "备份已保存至: $backup_dir/${config_name}_proxy.tar.gz"
+        fi
+    fi
+
+    # 删除配置
+    rm -f "$config_path" "/etc/nginx/sites-enabled/$config_name"
+    if nginx -t && systemctl reload nginx; then
+        echo "网站配置 $config_name 已删除。路径: $config_path"
+    else
+        echo "错误：Nginx 配置验证失败，已回滚删除操作"
+        rm -f "$config_path" "/etc/nginx/sites-enabled/$config_name"  # 确保回滚
+        systemctl reload nginx
+    fi
+    ;;
     6)
         echo "===== 网站配置状态 ====="
         echo "[已启用]:"
